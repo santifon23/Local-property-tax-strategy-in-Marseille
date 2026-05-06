@@ -1,0 +1,131 @@
+---
+title: "Scenario"
+output: html_document
+date: "2026-05-04"
+---
+## Scenario Exercise — Leading to Final Recommendation
+
+We construct four contrasted scenarios over 2025–2027, combining 
+the key uncertainty factors identified in the signpost monitoring.
+
+```{r scenarios, fig.width=11, fig.height=6}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(gt)
+library(here)
+
+# --- Scenario parameters ---
+scenarios <- list(
+  "S1: Baseline\n(stable)" = list(
+    base_growth  = 0.035,
+    mobil_rate   = 0.25,
+    dgf_shock    = 0,
+    label        = "Stable macro, no reform"
+  ),
+  "S2: Cadastral\nreform" = list(
+    base_growth  = 0.08,
+    mobil_rate   = 0.25,
+    dgf_shock    = 0,
+    label        = "Cadastral revaluation enacted (+8% base)"
+  ),
+  "S3: Housing\ndownturn" = list(
+    base_growth  = 0.01,
+    mobil_rate   = 0.10,
+    dgf_shock    = -0.03,
+    label        = "Price decline, DGF cut, low mobilisation"
+  ),
+  "S4: Budget\npressure" = list(
+    base_growth  = 0.025,
+    mobil_rate   = 0.15,
+    dgf_shock    = -0.05,
+    label        = "DGF cut -5%, moderate base growth"
+  )
+)
+
+# --- Strategy parameters ---
+strategies <- list(
+  "Rate +2pp"              = list(delta_taux = 0.02, mobil_share = 0.0),
+  "Vacancy mobilisation"   = list(delta_taux = 0.00, mobil_share = 1.0),
+  "Mixed (+1pp + 25%)"     = list(delta_taux = 0.01, mobil_share = 0.5)
+)
+
+# Base values
+base_2024      <- 1128490752
+taux_2024      <- 0.4454
+vacants_struct <- 14529
+base_per_unit  <- 3229
+n_years        <- 3
+
+# --- Simulate ---
+results <- expand.grid(
+  scenario = names(scenarios),
+  strategy = names(strategies),
+  year     = 1:n_years
+) %>%
+  rowwise() %>%
+  mutate(
+    sc = list(scenarios[[scenario]]),
+    st = list(strategies[[strategy]]),
+    base_t = base_2024 * (1 + sc$base_growth) ^ year,
+    extra_base = vacants_struct * sc$mobil_rate * st$mobil_share * base_per_unit,
+    taux_t = taux_2024 + st$delta_taux,
+    revenue_M = (base_t + extra_base) * taux_t / 1e6,
+    actual_year = 2024 + year
+  ) %>%
+  ungroup()
+
+# --- Plot ---
+ggplot(results, aes(x = actual_year, y = revenue_M, 
+                     color = strategy, linetype = strategy)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  geom_hline(yintercept = 502.9, linetype = "dotted", 
+             color = "black", linewidth = 0.7) +
+  facet_wrap(~scenario, ncol = 2) +
+  scale_color_manual(values = c("Rate +2pp"            = "#e74c3c",
+                                 "Vacancy mobilisation" = "#2980b9",
+                                 "Mixed (+1pp + 25%)"   = "#8e44ad")) +
+  scale_linetype_manual(values = c("Rate +2pp"            = "dashed",
+                                    "Vacancy mobilisation" = "solid",
+                                    "Mixed (+1pp + 25%)"   = "dotdash")) +
+  labs(title = "Projected TFPB revenues by scenario and strategy (2025–2027)",
+       subtitle = "Dotted line = 2024 actual revenue (502.9 M€)",
+       x = "Year", y = "Revenue (M€)", 
+       color = "Strategy", linetype = "Strategy") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom")
+ggsave(here("output", "Projected_TFPB.png"))
+```
+
+
+```{r}
+summary_table <- results %>%
+  filter(year == 3) %>%
+  select(scenario, strategy, revenue_M) %>%
+  mutate(revenue_M = round(revenue_M, 1)) %>%
+  pivot_wider(names_from = strategy, values_from = revenue_M)
+
+tab <- summary_table %>%
+  gt() %>%
+  cols_label(
+    scenario = "Scenario",
+    `Rate +2pp` = "Rate +2pp (M€)",
+    `Vacancy mobilisation` = "Vacancy mobil. (M€)",
+    `Mixed (+1pp + 25%)` = "Mixed (M€)"
+  ) %>%
+  tab_header(
+    title = "Projected TFPB revenue in Year 3 (2027)",
+    subtitle = "By scenario and strategy"
+  ) %>%
+  cols_align(
+    align = "center",
+    -scenario
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+gtsave(tab, here("output","Scenarios.png"))
+tab
+```

@@ -1,0 +1,79 @@
+---
+title: "Structural_Break"
+output: html_document
+---
+# Set Up
+```{r}
+library(tidyverse)
+library(readr)
+library(scales)
+library(ggrepel)
+library(patchwork)
+library(gt)
+library(knitr)
+library(here)
+library(strucchange)
+```
+
+```{r}
+theme_set(
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title    = element_text(face = "bold", size = 13),
+      plot.subtitle = element_text(color = "grey40", size = 11),
+      plot.caption  = element_text(color = "grey50", size = 9),
+      panel.grid.minor = element_blank()
+    )
+)
+
+REF_YEAR <- 2013
+
+# Vertical-line annotations (institutional breaks)
+BREAKS <- data.frame(
+  x     = c(2016, 2021),
+  label = c("Métropole AMP", "TH reform")
+)
+
+vlines <- function() {
+  list(
+    geom_vline(data = BREAKS, aes(xintercept = x),
+               linetype = "dashed", color = "#E74C3C", alpha = 0.7),
+    annotate("text", x = BREAKS$x + 0.15,
+             y = -Inf, label = BREAKS$label,
+             hjust = 0, vjust = -0.5, size = 3, color = "#E74C3C")
+  )
+}
+```
+
+# Data Sets
+```{r}
+rei <- read.csv(here("cache", "rei.csv"))
+```
+
+# Structural Break
+```{r}
+# Test on log base
+base_ts <- ts(log(rei$base_nette), start = REF_YEAR)
+ 
+# Chow-type break test at candidate years
+cat("  Breakpoint test (Chow) at 2016 (AMP) and 2021 (TH reform):\n")
+fs_2016 <- Fstats(base_ts ~ 1, from = 0.2)
+print(sctest(fs_2016))
+ 
+bp <- breakpoints(base_ts ~ 1, h = 3)
+cat("  Optimal breakpoints (BIC):\n")
+print(summary(bp))
+ 
+# Visualize break test
+png(here("output", "breakpoint_base.png"),
+    width = 900, height = 500, res = 120)
+plot(fs_2016, main = "F-statistics: structural break in TFPB base")
+
+breakpoints(fs_2016)
+dev.off()
+
+```
+```{r}
+plot(fs_2016, main = "F-statistics: structural break in TFPB base")
+```
+

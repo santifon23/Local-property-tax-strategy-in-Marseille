@@ -1,0 +1,174 @@
+---
+title: "NOSE"
+output: html_document
+---
+# Set Up
+```{r}
+library(here)
+library(readxl)
+library(readr)
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(strucchange)
+
+theme_set(
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title       = element_text(face = "bold", size = 13),
+      plot.subtitle    = element_text(color = "grey40", size = 10),
+      plot.caption     = element_text(color = "grey50", size = 8.5),
+      panel.grid.minor = element_blank(),
+      legend.position  = "bottom"
+    )
+)
+
+# Reference year for all indexing
+REF_YEAR <- 2013
+ 
+# Vertical-line annotations (institutional breaks)
+BREAKS <- data.frame(
+  x     = c(2016, 2021),
+  label = c("Métropole AMP", "TH reform")
+)
+ 
+vlines <- function() {
+  list(
+    geom_vline(data = BREAKS, aes(xintercept = x),
+               linetype = "dashed", color = "#E74C3C", alpha = 0.7),
+    annotate("text", x = BREAKS$x + 0.15,
+             y = -Inf, label = BREAKS$label,
+             hjust = 0, vjust = -0.5, size = 3, color = "#E74C3C")
+  )
+}
+```
+
+# Data Set
+```{r}
+rei <- read.csv(here("cache", "rei.csv"))
+```
+
+# Integrated Analysis
+## TFPB revenues
+```{r}
+g1 <- ggplot(rei, aes(x = annee, y = montant_reel / 1e6)) +
+  geom_line(color = "#2C3E50", linewidth = 1.2) +
+  geom_point(color = "#2C3E50", size = 3) +
+  vlines() +
+  scale_x_continuous(breaks = 2013:2024) +
+  labs(
+    title   = "TFPB revenues in Marseille (2013–2024)",
+    subtitle = "Actual revenues collected by the municipality",
+    x = NULL, y = "Revenue (€ millions)",
+    caption = "Source: REI, DGFiP"
+  )
+g1
+```
+
+## Rate vs base decomposition
+```{R}
+g2 <- rei %>%
+  select(annee, effet_base, effet_taux) %>%
+  pivot_longer(-annee, names_to = "component", values_to = "value") %>%
+  mutate(component = recode(component,
+    effet_base = "Base effect",
+    effet_taux = "Rate effect"
+  )) %>%
+  ggplot(aes(x = annee, y = value / 1e6, fill = component)) +
+  geom_col() +
+  vlines() +
+  scale_fill_manual(values = c("Base effect" = "#3498DB", "Rate effect" = "#E74C3C")) +
+  scale_x_continuous(breaks = 2013:2024) +
+  labs(
+    title    = "Decomposition of TFPB revenue growth (2013–2024)",
+    subtitle = paste0("Reference year: ", REF_YEAR, " (constant rate)"),
+    x = NULL, y = "Revenue gap vs. reference year (M€)", fill = NULL,
+    caption = "Source: REI, DGFiP"
+  )
+g2
+```
+
+## Indexed series
+```{R}
+g3 <- rei %>%
+  select(annee, index_base, index_recettes, index_taux) %>%
+  pivot_longer(-annee, names_to = "series", values_to = "value") %>%
+  mutate(series = recode(series,
+    index_base     = "Tax base",
+    index_recettes = "Revenues",
+    index_taux     = "Voted rate"
+  )) %>%
+  ggplot(aes(x = annee, y = value, color = series, group = series)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  geom_hline(yintercept = 100, linetype = "dotted", color = "grey50") +
+  vlines() +
+  scale_color_manual(values = c(
+    "Tax base"   = "#3498DB",
+    "Revenues"   = "#2ECC71",
+    "Voted rate" = "#E74C3C"
+  )) +
+  scale_x_continuous(breaks = 2013:2024) +
+  labs(
+    title   = "Tax base, voted rate and revenues — indexed (2013 = 100)",
+    x = NULL, y = "Index (2013 = 100)", color = NULL,
+    caption = "Source: REI, DGFiP"
+  )
+g3
+```
+
+## Base per article
+```{R}
+g4 <- ggplot(rei, aes(x = annee, y = base_par_article)) +
+  geom_line(color = "#8E44AD", linewidth = 1.2) +
+  geom_point(color = "#8E44AD", size = 3) +
+  vlines() +
+  scale_x_continuous(breaks = 2013:2024) +
+  labs(
+    title   = "Average cadastral base per property (2013–2024)",
+    subtitle = "Proxy for cadastral value drift",
+    x = NULL, y = "Base per article (€)",
+    caption = "Source: REI, DGFiP"
+  )
+g4
+```
+
+## Commune vs métropole rate split
+```{R}
+g5 <- rei %>%
+  select(annee, taux_vote, taux_metro) %>%
+  pivot_longer(-annee, names_to = "component", values_to = "rate") %>%
+  mutate(component = recode(component,
+    taux_vote  = "Municipality (Marseille)",
+    taux_metro = "Métropole AMP"
+  )) %>%
+  ggplot(aes(x = annee, y = rate, fill = component)) +
+  geom_area(alpha = 0.85) +
+  vlines() +
+  scale_fill_manual(values = c(
+    "Municipality (Marseille)" = "#1565C0",
+    "Métropole AMP"            = "#90CAF9"
+  )) +
+  scale_x_continuous(breaks = 2013:2024) +
+  labs(
+    title    = "TFPB rate split: municipality vs. Métropole AMP",
+    subtitle = "Marseille only controls the municipal portion",
+    x = NULL, y = "Rate (%)", fill = NULL,
+    caption = "Source: REI, DGFiP"
+  )
+g5
+```
+
+## Panel creation
+```{r}
+(g1 + g2) / (g3 + g4) / g5 +
+  plot_annotation(
+    title   = "Marseille TFPB — Full diagnostic (2013–2024)",
+    caption = "Source: REI, DGFiP | Red dashed lines: institutional breaks"
+  )
+ggsave(here("output", "rei_diagnostic_panel.png"),
+       width = 14, height = 15, dpi = 150)
+```

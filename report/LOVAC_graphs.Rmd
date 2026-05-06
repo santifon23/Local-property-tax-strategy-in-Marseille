@@ -1,0 +1,230 @@
+---
+title: "LOVAC Statistics"
+output: html_document
+---
+# Set Up
+```{r}
+library(tidyverse)
+library(readr)
+library(scales)
+library(ggrepel)
+library(patchwork)
+library(gt)
+library(knitr)
+library(here)
+
+theme_set(
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title    = element_text(face = "bold", size = 13),
+      plot.subtitle = element_text(color = "grey40", size = 11),
+      plot.caption  = element_text(color = "grey50", size = 9),
+      panel.grid.minor = element_blank()
+    )
+)
+
+MARSEILLE_ARR <- sprintf("132%02d", 1:16)   # 13201 … 13216
+```
+
+LOVAC - Descriptive Analysis: Local property-tax strategy in
+Marseille
+
+Data: Logements Vacants du Parc Privé (LOVAC), CEREMA /data.gouv.fr
+
+NOTE ON MARSEILLE: Marseille is NOT stored under a single code in LOVAC.
+It appears as 16 arrondissements with INSEE codes 13201 to 13216. All
+analysis requires aggregating these 16 rows before comparing Marseille
+to other cities. Similarly, Paris (75056 split into 75101–75120) and
+Lyon (69123 split into 69381–69389) may need the same treatment
+depending on the LOVAC edition.
+
+# Data Set
+```{r}
+lovac_peers <- read.csv(here("cache", "lovac_peers.csv")) %>% 
+  mutate(
+    CODGEO_25 = as.character(CODGEO_25),
+    year = as.character(year)
+  )
+
+lovac_long <- read.csv(here("cache", "lovac_long.csv" )) %>% 
+    mutate(
+    CODGEO_25 = as.character(CODGEO_25),
+    year = as.character(year)
+  )
+```
+
+
+# Descriptive analalisis LOVAC
+## Summary statictics
+```{r}
+latest_year <- "2024" # 2025 is incomplete
+ 
+summary_tbl <- lovac_peers %>%
+  filter(year == latest_year) %>%
+  arrange(desc(tx_lv_sup2)) %>%
+  select(LIBGEO_25, nb_lp, nb_lv, nb_lv_sup2, nb_lv_inf2,
+         tx_lv, tx_lv_sup2, tx_lv_inf2, share_structural)
+ 
+t <- summary_tbl %>%
+  gt() %>%
+  tab_header(
+    title    = "LOVAC — Vacant private dwellings, peer cities",
+    subtitle = glue::glue("Year {latest_year} · Marseille aggregated from 16 arrondissements")
+  ) %>%
+  fmt_number(columns = c(nb_lp, nb_lv, nb_lv_sup2, nb_lv_inf2), decimals = 0) %>%
+  fmt_percent(columns = c(tx_lv, tx_lv_sup2, tx_lv_inf2, share_structural),
+              decimals = 1) %>%
+  cols_label(
+    LIBGEO_25        = "City",
+    nb_lp            = "Private stock",
+    nb_lv            = "Vacant (total)",
+    nb_lv_sup2       = "Structural (2+ yr)",
+    nb_lv_inf2       = "Frictional (<2 yr)",
+    tx_lv            = "Vacancy rate",
+    tx_lv_sup2       = "Structural rate",
+    tx_lv_inf2       = "Frictional rate",
+    share_structural = "% structural"
+  ) %>%
+  tab_style(
+    style = list(cell_fill(color = "#DBEAFE"), cell_text(weight = "bold")),
+    locations = cells_body(rows = LIBGEO_25 == "Marseille")
+  ) %>%
+  tab_footnote(
+    footnote = "Marseille: sum of arrondissements 13201–13216. Paris: 75101–75120. Lyon: 69381–69389.",
+    locations = cells_column_labels(columns = LIBGEO_25)
+  ) %>%
+  tab_source_note("Source: LOVAC open data, CEREMA / DGFiP")
+t
+```
+
+### Export Table
+```{r}
+gtsave(t, here("output", "LOVAC —Vacant private dwellings.png"))
+```
+
+## MARSEILLE LONGITUDINAL ANALYSIS
+```{r}
+marseille <- lovac_peers %>% filter(CODGEO_25 == "13055")
+ 
+# --- 5.1 Stock by vacancy type (stacked bar) ---------------------------------
+p_stock <- marseille %>%
+  select(year, nb_lv_sup2, nb_lv_inf2) %>%
+  pivot_longer(-year, names_to = "type", values_to = "n") %>%
+  mutate(type = recode(type,
+    nb_lv_sup2 = "Structural (2+ years)",
+    nb_lv_inf2 = "Frictional (< 2 years)"
+  )) %>%
+  ggplot(aes(x = year, y = n, fill = type)) +
+  geom_col(position = "stack", width = 0.65) +
+  scale_y_continuous(labels = label_comma()) +
+  scale_fill_manual(values = c("#1565C0", "#90CAF9")) +
+  labs(
+    title    = "Marseille — Vacant private dwellings by type",
+    subtitle = "Aggregated from 16 arrondissements (13201–13216)",
+    x = NULL, y = "Dwellings", fill = NULL,
+    caption  = "Source: LOVAC open data"
+  ) +
+  theme(legend.position = "bottom")
+ 
+# --- 5.2 Vacancy rates over time --------------------------------------------
+p_rate <- marseille %>%
+  select(year, tx_lv, tx_lv_sup2, tx_lv_inf2) %>%
+  pivot_longer(-year, names_to = "indicator", values_to = "rate") %>%
+  mutate(indicator = recode(indicator,
+    tx_lv      = "Total",
+    tx_lv_sup2 = "Structural (2+ yr)",
+    tx_lv_inf2 = "Frictional (< 2 yr)"
+  )) %>%
+  ggplot(aes(x = year, y = rate, color = indicator, group = indicator)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2.5) +
+  scale_y_continuous(labels = label_percent(accuracy = 0.1), limits = c(0, NA)) +
+  scale_color_manual(values = c("#1565C0", "#42A5F5", "#90CAF9")) +
+  labs(
+    title = "Marseille — Vacancy rate trends",
+    x = NULL, y = "Rate", color = NULL,
+    caption = "Source: LOVAC open data"
+  ) +
+  theme(legend.position = "bottom")
+ 
+# --- 5.3 Arrondissement breakdown (latest year) ------------------------------
+marseille_arr_latest <- lovac_long %>%
+  filter(CODGEO_25 %in% MARSEILLE_ARR, year == latest_year)  %>% 
+  mutate(
+    tx_lv      = nb_lv / nb_lp,
+    tx_lv_sup2 = nb_lv_sup2 / nb_lp,
+    arr_label  = paste0(substr(CODGEO_25, 4, 5), "e"),  # "01e", "02e", etc.
+    arr_label  = fct_reorder(arr_label, tx_lv_sup2)
+  )
+ 
+p_arr <- marseille_arr_latest %>%
+  ggplot(aes(x = arr_label, y = tx_lv_sup2,
+             fill = tx_lv_sup2)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = percent(tx_lv_sup2, accuracy = 0.1)),
+            hjust = -0.1, size = 3) +
+  scale_y_continuous(labels = label_percent(accuracy = 0.1),
+                     expand = expansion(mult = c(0, 0.15))) +
+  scale_fill_gradient(low = "#DBEAFE", high = "#1E3A8A", guide = "none") +
+  coord_flip() +
+  labs(
+    title    = "Marseille — Structural vacancy by arrondissement",
+    subtitle = glue::glue("Year {latest_year}"),
+    x = NULL, y = "Structural vacancy rate",
+    caption  = "Source: LOVAC open data"
+  )
+ 
+# Save combined Marseille panel
+(p_stock / p_rate) | p_arr
+ggsave(here("output" ,"marseille_vacancy_analysis.png"), width = 14, height = 8, dpi = 150)
+```
+
+# Peer comparison
+```{r}
+p_peers_bar <- lovac_peers %>%
+  filter(year == latest_year) %>%
+  mutate(
+    LIBGEO_25    = fct_reorder(LIBGEO_25, tx_lv_sup2),
+    highlight = (CODGEO_25 == "13055")
+  ) %>%
+  ggplot(aes(x = LIBGEO_25, y = tx_lv_sup2, fill = highlight)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = percent(tx_lv_sup2, accuracy = 0.1)),
+            hjust = -0.1, size = 3.5) +
+  scale_y_continuous(labels = label_percent(accuracy = 0.1),
+                     expand  = expansion(mult = c(0, 0.14))) +
+  scale_fill_manual(values = c("grey75", "#1565C0"), guide = "none") +
+  coord_flip() +
+  labs(
+    title    = "Structural vacancy rate — peer comparison",
+    subtitle = glue::glue("Year {latest_year}"),
+    x = NULL, y = "Structural vacancy rate (2+ years)",
+    caption  = "Source: LOVAC open data · Marseille, Paris, Lyon aggregated from arrondissements"
+  )
+ 
+# --- Multi-year trends ---------------------------------------------------
+p_trends <- lovac_peers %>%
+  mutate(highlight = (CODGEO_25 == "13055")) %>%
+  ggplot(aes(x = year, y = tx_lv_sup2,
+             group = LIBGEO_25, color = highlight,
+             linewidth = highlight)) +
+  geom_line() +
+  geom_point(size = 2) +
+  geom_text_repel(
+    data = \(d) filter(d, year == max(as.numeric(year))-1),
+    aes(label = LIBGEO_25), size = 3.2, nudge_x = 0.15, direction = "y"
+  ) +
+  scale_color_manual(values = c("grey70", "#1565C0"), guide = "none") +
+  scale_linewidth_manual(values = c(0.7, 1.6), guide = "none") +
+  scale_y_continuous(labels = label_percent(accuracy = 0.1)) +
+  scale_x_discrete(breaks = unique(lovac_peers$year)) +
+  labs(
+    title    = "Structural vacancy trends — Marseille vs. peers",
+    subtitle = "Marseille highlighted in blue",
+    x = NULL, y = "Structural vacancy rate",
+    caption  = "Source: LOVAC open data"
+  )
+ 
+p_peers_bar / p_trends
+ggsave(here("output" ,"peer_comparison.png"), width = 10, height = 10, dpi = 150)
+```

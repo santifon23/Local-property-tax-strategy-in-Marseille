@@ -1,0 +1,279 @@
+---
+title: "Potential rev"
+output: html_document
+---
+# Set Up
+```{r}
+library(tidyverse)
+library(readr)
+library(scales)
+library(ggrepel)
+library(patchwork)
+library(gt)
+library(knitr)
+library(here)
+library(glue)
+
+theme_set(
+  theme_minimal(base_size = 12) +
+    theme(
+      plot.title    = element_text(face = "bold", size = 13),
+      plot.subtitle = element_text(color = "grey40", size = 11),
+      plot.caption  = element_text(color = "grey50", size = 9),
+      panel.grid.minor = element_blank()
+    )
+)
+```
+
+# Data Set
+```{r}
+rei_lovac <- read.csv(here("cache", "rei_lovac.csv"))
+```
+
+# Descriptive analalisis REI-LOVAC
+## Summary statictics
+```{r}
+summary_table <- rei_lovac %>%
+  select(annee, base_nette, taux_vote, taux_metro, taux_total,
+         montant_reel, nb_articles, base_par_article,
+         nb_lv_sup2, tx_lv_sup2,
+         recettes_potentielles, gain_25pct) %>%
+  mutate(
+    base_nette            = round(base_nette / 1e6, 1),
+    montant_reel          = round(montant_reel / 1e6, 1),
+    base_par_article      = round(base_par_article, 0),
+    nb_lv_sup2            = round(nb_lv_sup2, 0),
+    tx_lv_sup2            = round(tx_lv_sup2 * 100, 2),
+    recettes_potentielles = round(recettes_potentielles / 1e6, 1),
+    gain_25pct            = round(gain_25pct / 1e6, 1)
+  ) %>%
+  rename(
+    Year                    = annee,
+    `Base (M€)`             = base_nette,
+    `Rate commune (%)`      = taux_vote,
+    `Rate métropole (%)`    = taux_metro,
+    `Total rate (%)`        = taux_total,
+    `Revenue (M€)`          = montant_reel,
+    `N articles`            = nb_articles,
+    `Base/article (€)`      = base_par_article,
+    `Struct. vacant dwell.` = nb_lv_sup2,
+    `Struct. vacancy rate`  = tx_lv_sup2,
+    `Max foregone rev (M€)` = recettes_potentielles,
+    `Gain 25% mobil. (M€)`  = gain_25pct
+  )
+```
+
+## Table construction
+```{r}
+t <- summary_table %>%
+  gt() %>%
+  tab_header(
+    title    = "LOVAC — Fiscal summary",
+    subtitle = glue("Period covered: {min(summary_table$Year)}–{max(summary_table$Year)}")
+  ) %>%
+  fmt_number(
+    columns = c(`Base (M€)`, `Revenue (M€)`, `Max foregone rev (M€)`, `Gain 25% mobil. (M€)`),
+    decimals = 1
+  ) %>%
+  fmt_number(
+    columns = c(`N articles`, `Base/article (€)`, `Struct. vacant dwell.`),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = c(`Rate commune (%)`, `Rate métropole (%)`, `Total rate (%)`, `Struct. vacancy rate`),
+    decimals = 2
+  ) %>%
+  cols_label(
+    Year                    = "Year",
+    `Base (M€)`             = "Tax base (M€)",
+    `Rate commune (%)`      = "Commune rate (%)",
+    `Rate métropole (%)`    = "Metro rate (%)",
+    `Total rate (%)`        = "Total rate (%)",
+    `Revenue (M€)`          = "Revenue (M€)",
+    `N articles`            = "Tax units",
+    `Base/article (€)`      = "Base per unit (€)",
+    `Struct. vacant dwell.` = "Structural vacant dwellings",
+    `Struct. vacancy rate`  = "Structural vacancy rate (%)",
+    `Max foregone rev (M€)` = "Foregone revenue (M€)",
+    `Gain 25% mobil. (M€)`  = "Potential gain (M€)"
+  ) %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "#DBEAFE"),
+      cell_text(weight = "bold")
+    ),
+    locations = cells_body(rows = Year == max(Year))
+  ) %>%
+  tab_source_note(
+    source_note = "Source: LOVAC open data, CEREMA / DGFiP"
+  )
+t
+```
+## Export Table
+```{r}
+gtsave(t, here("output", "LOVAC — Fiscal summary.png"))
+```
+
+# Integrated Analysis
+## Revenue foregone vs actual
+```{r}
+g1 <- rei_lovac %>%
+  select(annee, montant_reel, recettes_potentielles) %>%
+  pivot_longer(-annee, names_to = "series", values_to = "value") %>%
+  mutate(series = recode(series,
+    montant_reel          = "Actual TFPB revenue",
+    recettes_potentielles = "Max foregone (100% structural vacancies)"
+  )) %>%
+  ggplot(aes(x = annee, y = value / 1e6,
+             color = series, linetype = series, group = series)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  scale_linetype_manual(values = c("solid", "dashed")) +
+  scale_color_manual(values = c("#1565C0", "#E74C3C")) +
+  scale_x_continuous(breaks = 2020:2024) +
+  labs(
+    title    = "Actual TFPB revenue vs. maximum foregone revenue",
+    subtitle = "Foregone = all structural vacancies (2+ yr) at current rate & base/article",
+    x = NULL, y = "€ millions", color = NULL, linetype = NULL,
+    caption = "Source: REI + LOVAC, DGFiP / CEREMA"
+  )
+g1
+```
+
+## Mobilization scenarios (stacked bar)
+```{R}
+g2 <- rei_lovac %>%
+  select(annee, gain_10pct, gain_25pct, gain_50pct) %>%
+  pivot_longer(-annee, names_to = "scenario", values_to = "gain") %>%
+  mutate(scenario = recode(scenario,
+    gain_10pct = "10% mobilized",
+    gain_25pct = "25% mobilized",
+    gain_50pct = "50% mobilized"
+  )) %>%
+  ggplot(aes(x = factor(annee), y = gain / 1e6, fill = scenario)) +
+  geom_col(position = "dodge", width = 0.7) +
+  scale_fill_manual(values = c("#90CAF9", "#42A5F5", "#1565C0")) +
+  labs(
+    title    = "Potential TFPB gain from vacancy mobilization",
+    subtitle = "By mobilization scenario (% of structural vacancies re-entering base)",
+    x = NULL, y = "Additional revenue (M€)", fill = NULL,
+    caption = "Source: REI + LOVAC, DGFiP / CEREMA"
+  )
+g2
+```
+
+## Rate hike vs vacancy mobilization (strategy comparison)
+```{R}
+# How many percentage points of rate increase would be needed to match
+# each mobilization scenario?
+g3 <- rei_lovac %>%
+  mutate(
+    # Equivalent rate hike (pp) to match each mobilization gain
+    eq_rate_10 = gain_10pct / (base_nette / 100),
+    eq_rate_25 = gain_25pct / (base_nette / 100),
+    eq_rate_50 = gain_50pct / (base_nette / 100)
+  ) %>%
+  select(annee, eq_rate_10, eq_rate_25, eq_rate_50) %>%
+  pivot_longer(-annee, names_to = "scenario", values_to = "equiv_rate_pp") %>%
+  mutate(scenario = recode(scenario,
+    eq_rate_10 = "10% vacancy mobil.",
+    eq_rate_25 = "25% vacancy mobil.",
+    eq_rate_50 = "50% vacancy mobil."
+  )) %>%
+  ggplot(aes(x = annee, y = equiv_rate_pp,
+             color = scenario, group = scenario)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2.5) +
+  scale_color_manual(values = c("#90CAF9", "#42A5F5", "#1565C0")) +
+  scale_x_continuous(breaks = 2020:2024) +
+  labs(
+    title    = "Rate hike equivalent of each vacancy mobilization scenario",
+    subtitle = "How many additional pp of TFPB rate would yield the same revenue?",
+    x = NULL, y = "Equivalent rate increase (pp)", color = NULL,
+    caption = "Source: REI + LOVAC"
+  )
+g3
+```
+
+## Structural vacancy rate vs base growth (dual axis)
+```{R}
+# Shows the tension: if vacant dwellings re-enter, base grows — and vice versa
+g4_data <- rei_lovac %>%
+  select(annee, tx_lv_sup2, croissance_base) %>%
+  drop_na()
+ 
+g4 <- ggplot(g4_data, aes(x = annee)) +
+  geom_col(aes(y = tx_lv_sup2 * 100), fill = "#E74C3C", alpha = 0.4, width = 0.5) +
+  geom_line(aes(y = croissance_base), color = "#1565C0", linewidth = 1.2) +
+  geom_point(aes(y = croissance_base), color = "#1565C0", size = 3) +
+  geom_hline(yintercept = 0, linetype = "dotted", color = "grey40") +
+  scale_x_continuous(breaks = 2020:2024) +
+  labs(
+    title    = "Structural vacancy rate (bars) vs. tax base growth (line)",
+    subtitle = "Blue line: annual base growth %; Red bars: structural vacancy rate %",
+    x = NULL, y = "% ",
+    caption = "Source: REI + LOVAC"
+  )
+g4
+```
+
+## Three-strategy revenue comparison (final decision chart)
+```{R}
+# For the most recent year: compare the three strategies side by side
+latest <- rei_lovac %>% filter(annee == max(annee))
+ 
+strategies <- tibble(
+  strategy = c(
+    "Do nothing",
+    "Rate +1pp",
+    "Rate +2pp",
+    "25% vacancy\nmobilization",
+    "50% vacancy\nmobilization",
+    "Mixed: +1pp rate\n+ 25% mobil."
+  ),
+  gain_M = c(
+    0,
+    latest$gain_1pp_rate / 1e6,
+    2 * latest$gain_1pp_rate / 1e6,
+    latest$gain_25pct / 1e6,
+    latest$gain_50pct / 1e6,
+    (latest$gain_1pp_rate + latest$gain_25pct) / 1e6
+  ),
+  type = c("Baseline", "Rate", "Rate",
+           "Base/vacancy", "Base/vacancy", "Mixed")
+)
+ 
+g5 <- strategies %>%
+  mutate(strategy = fct_reorder(strategy, gain_M)) %>%
+  ggplot(aes(x = strategy, y = gain_M, fill = type)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = paste0("+", round(gain_M, 1), " M€")),
+            hjust = -0.1, size = 3.5, fontface = "bold") +
+  scale_fill_manual(values = c(
+    "Baseline"     = "grey80",
+    "Rate"         = "#E74C3C",
+    "Base/vacancy" = "#3498DB",
+    "Mixed"        = "#8E44AD"
+  )) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.2))) +
+  coord_flip() +
+  labs(
+    title    = "Revenue gain by strategy — Marseille",
+    subtitle = paste0("Simulated for year ", max(rei_lovac$annee),
+                      " using actual REI base & LOVAC vacancy stock"),
+    x = NULL, y = "Additional annual revenue vs. do-nothing (M€)", fill = "Strategy type",
+    caption = "Source: REI + LOVAC | Rate strategies = municipal rate only"
+  )
+g5
+```
+
+## Panel creation
+```{r}
+(g1 + g2) / (g3 + g4) / g5 +
+  plot_annotation(
+    title   = "Marseille TFPB — REI × LOVAC integrated analysis (2020–2024)",
+    caption = "Source: REI (DGFiP) + LOVAC (CEREMA / DGFiP)"
+  )
+ggsave(here("output", "rei_lovac_integrated.png"),
+       width = 14, height = 16, dpi = 150)
+```

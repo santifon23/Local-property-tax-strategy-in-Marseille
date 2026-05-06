@@ -1,0 +1,60 @@
+---
+title: "Signpost Monitoring — Marseille TFPB"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(knitr)
+library(kableExtra)
+library(here)
+```
+
+## Widening Method: Signpost Monitoring
+
+We identify five key external uncertainty factors that could materially affect 
+TFPB revenues over the next three years, with observable signposts and alert thresholds.
+
+```{r signpost-table}
+signposts <- data.frame(
+  Factor = c(
+    "Cadastral revaluation reform",
+    "Real estate market",
+    "State grants (DGF)",
+    "Structural vacancy",
+    "TLV extension"
+  ),
+  Signpost = c(
+    "Parliamentary calendar; DGFiP simulation reports",
+    "DVF transaction volumes; Notaires de France price index",
+    "PLF budget law DGF allocation; OFGL fiscal reports",
+    "LOVAC annual update: structural vacancy stock",
+    "JORF decrees; DGCL circulars"
+  ),
+  Alert_threshold = c(
+    "Reform enacted with < 3 year horizon",
+    "Price decline >5% OR volume drop >15%",
+    "DGF cut >3% in real terms",
+    "Structural rate > 4.5% OR stock >16,000 units",
+    "TLV extended to > 50% of Marseille arrondissements"
+  ),
+  Strategic_implication = c(
+    "Accelerate base modernisation strategy before reform locks in new values",
+    "Reduce reliance on base growth; prioritise rate or vacancy levers",
+    "Increase urgency of vacancy mobilisation to offset grant losses",
+    "Intensify ANAH partnerships and vacancy taxation enforcement",
+    "Rebalance toward rate increase if vacancy taxation revenue declines"
+  )
+)
+
+kable(signposts, 
+      col.names = c("Uncertainty factor", "Signpost", 
+                    "Alert threshold", "Strategic implication"),
+      caption = "Signpost monitoring table — Marseille TFPB strategy",
+      booktabs = TRUE) %>%
+  kable_styling(latex_options = c("striped", "scale_down", "hold_position")) %>%
+  column_spec(1, width = "2.5cm") %>%
+  column_spec(2, width = "3.5cm") %>%
+  column_spec(3, width = "3cm") %>%
+  column_spec(4, width = "4cm")
+```
